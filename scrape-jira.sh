@@ -1,11 +1,13 @@
 #!/bin/bash
 #
 # Jira Ticket Scraper
-# Scrapes in-progress tickets assigned to you from jira.tools.sap
+# Scrapes tickets assigned to you from jira.tools.sap
 #
 # Usage:
-#   ./scrape-jira.sh          # Run with saved session
-#   ./scrape-jira.sh --login  # Force new login
+#   ./scrape-jira.sh                          # Fetch all tickets
+#   ./scrape-jira.sh --status "In Progress"   # Fetch only in-progress tickets
+#   ./scrape-jira.sh --login                  # Force new login
+#   ./scrape-jira.sh --help                   # Show help
 #
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,21 +26,8 @@ if [ ! -d "$VENV_DIR" ]; then
     exit 1
 fi
 
-# Parse arguments
-ARGS=""
-for arg in "$@"; do
-    case $arg in
-        --login)
-            ARGS="$ARGS --login"
-            ;;
-        *)
-            ARGS="$ARGS $arg"
-            ;;
-    esac
-done
-
-# Run the scraper
-"$VENV_DIR/bin/python" "$PYTHON_SCRIPT" $ARGS
+# Pass all arguments directly to Python script
+"$VENV_DIR/bin/python" "$PYTHON_SCRIPT" "$@"
 
 echo ""
 echo "Output files are in: $SCRIPT_DIR/output/"

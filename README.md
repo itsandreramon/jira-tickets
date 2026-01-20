@@ -1,6 +1,6 @@
 # Jira Ticket Scraper
 
-Scrapes in-progress Jira tickets assigned to you from jira.tools.sap and saves each ticket description to a separate text file.
+Scrapes Jira tickets assigned to you from jira.tools.sap and saves each ticket description to a separate text file.
 
 ## Setup
 
@@ -22,11 +22,28 @@ playwright install chromium
 ## Usage
 
 ```bash
-./scrape-jira.sh          # Run with saved session
-./scrape-jira.sh --login  # Force new login
+./scrape-jira.sh                          # Fetch all tickets assigned to you
+./scrape-jira.sh --status "In Progress"   # Fetch only in-progress tickets
+./scrape-jira.sh --status "Open"          # Fetch only open tickets
+./scrape-jira.sh --login                  # Force new login (refresh session)
+./scrape-jira.sh --help                   # Show help with all options
 ```
 
-Output files are saved to the `output/` directory.
+### Common Status Values
+
+- `Open`
+- `In Progress`
+- `Ready for Review`
+- `In Review`
+- `Ready to Submit`
+- `Done`
+- `Closed`
+
+Note: Status values are case-sensitive and may vary by project.
+
+## Output
+
+Output files are saved to the `output/` directory, one `.txt` file per ticket.
 
 ## Files
 

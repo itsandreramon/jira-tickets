@@ -2,8 +2,14 @@
 """
 Jira Ticket Scraper
 
-Fetches in-progress tickets from jira.tools.sap using Playwright and the Jira REST API.
+Fetches tickets from jira.tools.sap using Playwright and the Jira REST API.
 Saves each ticket description to a separate text file in the output directory.
+
+Examples:
+    ./scrape-jira.sh                        # Fetch all tickets assigned to you
+    ./scrape-jira.sh --status "In Progress" # Fetch only in-progress tickets
+    ./scrape-jira.sh --status "Open"        # Fetch only open tickets
+    ./scrape-jira.sh --login                # Force new login
 """
 import asyncio
 import argparse
@@ -22,7 +28,17 @@ CREDENTIALS_FILE = SCRIPT_DIR / ".jira_credentials.json"
 OUTPUT_DIR = SCRIPT_DIR / "output"
 
 JIRA_BASE_URL = "https://jira.tools.sap"
-JQL_QUERY = "assignee = currentUser() AND status = 'In Progress' ORDER BY updated DESC"
+
+# Common Jira status values for reference
+VALID_STATUSES = [
+    "Open",
+    "In Progress",
+    "Ready for Review",
+    "In Review",
+    "Ready to Submit",
+    "Done",
+    "Closed",
+]
 
 # =============================================================================
 # Cookie and credential management
@@ -95,7 +111,27 @@ async def login(page):
 # =============================================================================
 
 
-async def fetch_tickets_via_api(page, max_results=100):
+def build_jql_query(status=None):
+    """
+    Build JQL query based on provided filters.
+    
+    Args:
+        status: Optional status filter (e.g., "In Progress", "Open")
+    
+    Returns:
+        JQL query string
+    """
+    query_parts = ["assignee = currentUser()"]
+    
+    if status:
+        query_parts.append(f"status = '{status}'")
+    
+    query_parts.append("ORDER BY updated DESC")
+    
+    return " AND ".join(query_parts[:-1]) + " " + query_parts[-1]
+
+
+async def fetch_tickets_via_api(page, jql_query, max_results=100):
     """
     Fetch tickets using Jira REST API.
     
@@ -103,11 +139,12 @@ async def fetch_tickets_via_api(page, max_results=100):
     Returns the parsed JSON response or None on failure.
     """
     # URL-encode the JQL query
-    jql_encoded = JQL_QUERY.replace(" ", "%20").replace("=", "%3D").replace("'", "%27").replace("(", "%28").replace(")", "%29")
+    jql_encoded = jql_query.replace(" ", "%20").replace("=", "%3D").replace("'", "%27").replace("(", "%28").replace(")", "%29")
     
     # Build API URL with fields we need
     api_url = f"{JIRA_BASE_URL}/rest/api/2/search?jql={jql_encoded}&maxResults={max_results}&fields=key,summary,status,priority,assignee,reporter,labels,created,updated,description"
     
+    print(f"Query: {jql_query}")
     print("Fetching tickets from API...")
     response = await page.goto(api_url)
     
@@ -209,9 +246,38 @@ Description:
 
 async def main():
     """Main entry point - parse args, authenticate, fetch and save tickets."""
-    parser = argparse.ArgumentParser(description="Scrape Jira tickets")
-    parser.add_argument("--login", action="store_true", help="Force new login")
+    parser = argparse.ArgumentParser(
+        description="Scrape Jira tickets assigned to you",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=f"""
+Examples:
+  %(prog)s                        Fetch all tickets assigned to you
+  %(prog)s --status "In Progress" Fetch only in-progress tickets
+  %(prog)s --status "Open"        Fetch only open tickets
+  %(prog)s --login                Force new login (refresh session)
+
+Common status values:
+  {', '.join(VALID_STATUSES)}
+
+Note: Status values are case-sensitive and may vary by project.
+"""
+    )
+    parser.add_argument(
+        "--status", "-s",
+        type=str,
+        default=None,
+        metavar="STATUS",
+        help="Filter by ticket status (e.g., 'In Progress', 'Open')"
+    )
+    parser.add_argument(
+        "--login", "-l",
+        action="store_true",
+        help="Force new login (ignore saved session)"
+    )
     args = parser.parse_args()
+    
+    # Build JQL query based on arguments
+    jql_query = build_jql_query(status=args.status)
     
     async with async_playwright() as p:
         # Launch headless browser
@@ -235,7 +301,7 @@ async def main():
             await page.wait_for_timeout(3000)
         
         # Fetch tickets from Jira API
-        data = await fetch_tickets_via_api(page)
+        data = await fetch_tickets_via_api(page, jql_query)
         
         if data and "issues" in data:
             # Save cookies for future sessions
