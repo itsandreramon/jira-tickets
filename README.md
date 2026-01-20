@@ -2,6 +2,8 @@
 
 Scrapes Jira tickets assigned to you from jira.tools.sap and saves each ticket description to a separate text file.
 
+**This script is read-only and will never modify any Jira tickets.**
+
 ## Setup
 
 1. Create a Python virtual environment and install dependencies:

@@ -5,6 +5,8 @@ Jira Ticket Scraper
 Fetches tickets from jira.tools.sap using Playwright and the Jira REST API.
 Saves each ticket description to a separate text file in the output directory.
 
+This script is READ-ONLY and will never modify any Jira tickets.
+
 Examples:
     ./scrape-jira.sh                        # Fetch all tickets assigned to you
     ./scrape-jira.sh --status "In Progress" # Fetch only in-progress tickets
