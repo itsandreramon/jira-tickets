@@ -43,7 +43,19 @@ Note: Status values are case-sensitive and may vary by project.
 
 ## Output
 
-Output files are saved to the `output/` directory, one `.txt` file per ticket.
+Tickets are organized into folders by their Jira status:
+
+```
+output/
+├── blocked/
+├── code_review/
+├── completed/
+├── in_progress/
+├── ready_for_testing/
+└── testing/
+```
+
+Each ticket is saved as a `.txt` file in its corresponding status folder.
 
 ## Files
 
