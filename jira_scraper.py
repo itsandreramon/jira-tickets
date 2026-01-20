@@ -209,14 +209,33 @@ def format_ticket(issue):
     }
 
 
+def sanitize_folder_name(name):
+    """
+    Convert status name to a valid folder name.
+    
+    Replaces spaces and special characters with underscores.
+    """
+    if not name:
+        return "Unknown"
+    # Replace spaces and special chars with underscores, convert to lowercase
+    sanitized = re.sub(r'[^\w\-]', '_', name.lower())
+    # Remove consecutive underscores
+    sanitized = re.sub(r'_+', '_', sanitized)
+    return sanitized.strip('_')
+
+
 def save_ticket_description(ticket):
     """
     Save ticket details to a text file.
     
-    Creates one file per ticket in the output directory, named by ticket key.
+    Creates one file per ticket, organized into folders by status.
     """
-    OUTPUT_DIR.mkdir(exist_ok=True)
-    filepath = OUTPUT_DIR / f"{ticket['key']}.txt"
+    # Create status-based subfolder
+    status_folder = sanitize_folder_name(ticket['status'])
+    ticket_dir = OUTPUT_DIR / status_folder
+    ticket_dir.mkdir(parents=True, exist_ok=True)
+    
+    filepath = ticket_dir / f"{ticket['key']}.txt"
     
     content = f"""Ticket: {ticket['key']}
 Summary: {ticket['summary']}
