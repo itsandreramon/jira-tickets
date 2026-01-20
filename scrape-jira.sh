@@ -29,5 +29,7 @@ fi
 # Pass all arguments directly to Python script
 "$VENV_DIR/bin/python" "$PYTHON_SCRIPT" "$@"
 
-echo ""
-echo "Output files are in: $SCRIPT_DIR/output/"
+if [ $? -eq 0 ]; then
+    echo ""
+    echo "Output files are in: $SCRIPT_DIR/output/"
+fi
