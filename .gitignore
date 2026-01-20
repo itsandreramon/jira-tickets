@@ -1,0 +1,14 @@
+# Output files
+output/
+
+# Credentials and cookies
+.jira_credentials.json
+.jira_cookies.json
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
