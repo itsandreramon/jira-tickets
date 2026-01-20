@@ -35,7 +35,6 @@ playwright install chromium
 - `In Progress`
 - `Ready for Review`
 - `In Review`
-- `Ready to Submit`
 - `Done`
 - `Closed`
 
