@@ -5,13 +5,14 @@ Jira Ticket Scraper
 Fetches tickets from jira.tools.sap using Playwright and the Jira REST API.
 Saves each ticket description to a separate text file in the output directory.
 
-This script is READ-ONLY and will never modify any Jira tickets.
+Also supports changing ticket status via the Jira transitions API.
 
 Examples:
     ./scrape-jira.sh                        # Fetch all tickets assigned to you
     ./scrape-jira.sh --status "In Progress" # Fetch only in-progress tickets
     ./scrape-jira.sh --status "Open"        # Fetch only open tickets
     ./scrape-jira.sh --login                # Force new login
+    ./scrape-jira.sh --change-status TICKET-123 --to-status "In Progress"
 """
 import asyncio
 import argparse
@@ -111,6 +112,179 @@ async def login(page):
 # =============================================================================
 # Jira API interaction
 # =============================================================================
+
+
+async def get_transitions(page, issue_key):
+    """
+    Fetch available transitions for a ticket.
+    
+    Jira uses workflow transitions to change status. This function
+    returns the list of available transitions for the given issue.
+    
+    Args:
+        page: Playwright page object with active session
+        issue_key: Jira issue key (e.g., "PROJECT-123")
+    
+    Returns:
+        List of transitions with id and name, or None on failure
+    """
+    api_url = f"{JIRA_BASE_URL}/rest/api/2/issue/{issue_key}/transitions"
+    
+    print(f"Fetching available transitions for {issue_key}...")
+    response = await page.goto(api_url)
+    
+    if response.status != 200:
+        print(f"Failed to fetch transitions: HTTP {response.status}")
+        return None
+    
+    # Extract JSON from page content
+    content = await page.content()
+    
+    # Try to find JSON in <pre> tags first (Chrome format)
+    json_match = re.search(r'<pre[^>]*>(.*?)</pre>', content, re.DOTALL)
+    if json_match:
+        json_text = json_match.group(1)
+        json_text = json_text.replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&').replace('&quot;', '"')
+    else:
+        body_match = re.search(r'<body[^>]*>(.*?)</body>', content, re.DOTALL)
+        if body_match:
+            json_text = body_match.group(1).strip()
+            json_text = re.sub(r'<[^>]+>', '', json_text)
+            json_text = json_text.replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&').replace('&quot;', '"')
+        else:
+            json_text = content
+    
+    try:
+        data = json.loads(json_text)
+        return data.get("transitions", [])
+    except json.JSONDecodeError as e:
+        print(f"Failed to parse transitions JSON: {e}")
+        return None
+
+
+def find_transition_by_status(transitions, target_status):
+    """
+    Find a transition that leads to the target status.
+    
+    Args:
+        transitions: List of transition objects from Jira API
+        target_status: Desired status name (case-insensitive)
+    
+    Returns:
+        Transition object if found, None otherwise
+    """
+    target_lower = target_status.lower()
+    for transition in transitions:
+        # The transition's "to" field contains the destination status
+        to_status = transition.get("to", {}).get("name", "")
+        if to_status.lower() == target_lower:
+            return transition
+    return None
+
+
+async def execute_transition(page, issue_key, transition_id):
+    """
+    Execute a transition to change ticket status.
+    
+    Uses page.evaluate() to make an authenticated POST request
+    using the browser's session cookies.
+    
+    Args:
+        page: Playwright page object with active session
+        issue_key: Jira issue key (e.g., "PROJECT-123")
+        transition_id: ID of the transition to execute
+    
+    Returns:
+        True on success, False on failure
+    """
+    api_url = f"{JIRA_BASE_URL}/rest/api/2/issue/{issue_key}/transitions"
+    
+    print(f"Executing transition {transition_id} on {issue_key}...")
+    
+    # Use page.evaluate to make POST request with browser cookies
+    result = await page.evaluate("""
+        async (args) => {
+            const [url, transitionId] = args;
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        transition: { id: transitionId }
+                    }),
+                    credentials: 'include'
+                });
+                return {
+                    ok: response.ok,
+                    status: response.status,
+                    statusText: response.statusText
+                };
+            } catch (error) {
+                return { ok: false, error: error.message };
+            }
+        }
+    """, [api_url, transition_id])
+    
+    if result.get("ok"):
+        return True
+    else:
+        error_msg = result.get("error") or f"HTTP {result.get('status')} {result.get('statusText')}"
+        print(f"Failed to execute transition: {error_msg}")
+        return False
+
+
+async def change_ticket_status(page, issue_key, target_status):
+    """
+    Change a ticket's status to the target status.
+    
+    This function orchestrates the full status change:
+    1. Fetch available transitions for the issue
+    2. Find the transition that leads to the target status
+    3. Execute the transition
+    
+    Args:
+        page: Playwright page object with active session
+        issue_key: Jira issue key (e.g., "PROJECT-123")
+        target_status: Desired status name
+    
+    Returns:
+        True on success, False on failure
+    """
+    # Get available transitions
+    transitions = await get_transitions(page, issue_key)
+    if transitions is None:
+        return False
+    
+    if not transitions:
+        print(f"No transitions available for {issue_key}")
+        print("This may mean you don't have permission to change the status,")
+        print("or the ticket is in a state where no transitions are allowed.")
+        return False
+    
+    # Show available transitions
+    print(f"\nAvailable transitions for {issue_key}:")
+    for t in transitions:
+        to_status = t.get("to", {}).get("name", "Unknown")
+        print(f"  - {t.get('name')} -> {to_status}")
+    
+    # Find matching transition
+    transition = find_transition_by_status(transitions, target_status)
+    if not transition:
+        print(f"\nError: Cannot transition to '{target_status}'")
+        print(f"Available target statuses: {', '.join(t.get('to', {}).get('name', '') for t in transitions)}")
+        return False
+    
+    print(f"\nTransitioning {issue_key} to '{target_status}' via '{transition.get('name')}'...")
+    
+    # Execute the transition
+    success = await execute_transition(page, issue_key, transition.get("id"))
+    
+    if success:
+        print(f"Successfully changed {issue_key} status to '{target_status}'")
+    
+    return success
 
 
 def build_jql_query(status=None):
@@ -268,7 +442,7 @@ Description:
 async def main():
     """Main entry point - parse args, authenticate, fetch and save tickets."""
     parser = argparse.ArgumentParser(
-        description="Scrape Jira tickets assigned to you",
+        description="Scrape Jira tickets assigned to you, or change ticket status",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
 Examples:
@@ -276,6 +450,9 @@ Examples:
   %(prog)s --status "In Progress" Fetch only in-progress tickets
   %(prog)s --status "Open"        Fetch only open tickets
   %(prog)s --login                Force new login (refresh session)
+  
+  %(prog)s --change-status TICKET-123 --to-status "In Progress"
+                                  Change ticket status
 
 Common status values:
   {', '.join(VALID_STATUSES)}
@@ -295,9 +472,29 @@ Note: Status values are case-sensitive and may vary by project.
         action="store_true",
         help="Force new login (ignore saved session)"
     )
+    parser.add_argument(
+        "--change-status", "-c",
+        type=str,
+        default=None,
+        metavar="TICKET_KEY",
+        help="Change status of a ticket (requires --to-status)"
+    )
+    parser.add_argument(
+        "--to-status", "-t",
+        type=str,
+        default=None,
+        metavar="STATUS",
+        help="Target status for --change-status (e.g., 'In Progress')"
+    )
     args = parser.parse_args()
     
-    # Build JQL query based on arguments
+    # Validate arguments for status change
+    if args.change_status and not args.to_status:
+        parser.error("--change-status requires --to-status")
+    if args.to_status and not args.change_status:
+        parser.error("--to-status requires --change-status")
+    
+    # Build JQL query based on arguments (only used for fetching)
     jql_query = build_jql_query(status=args.status)
     
     async with async_playwright() as p:
@@ -320,6 +517,17 @@ Note: Status values are case-sensitive and may vary by project.
             print("Session expired or no session found. Logging in...")
             await login(page)
             await page.wait_for_timeout(3000)
+        
+        # Handle status change mode
+        if args.change_status:
+            success = await change_ticket_status(page, args.change_status, args.to_status)
+            
+            # Save cookies for future sessions
+            cookies = await context.cookies()
+            await save_cookies(cookies)
+            
+            await browser.close()
+            return 0 if success else 1
         
         # Fetch tickets from Jira API
         data = await fetch_tickets_via_api(page, jql_query)

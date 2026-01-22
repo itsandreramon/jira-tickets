@@ -2,7 +2,7 @@
 
 Scrapes Jira tickets assigned to you from jira.tools.sap and saves each ticket description to a separate text file.
 
-**This script is read-only and will never modify any Jira tickets.**
+Also supports **changing ticket status** via the Jira transitions API.
 
 ## Setup
 
@@ -23,6 +23,8 @@ playwright install chromium
 
 ## Usage
 
+### Fetching Tickets
+
 ```bash
 ./scrape-jira.sh                          # Fetch all tickets assigned to you
 ./scrape-jira.sh --status "In Progress"   # Fetch only in-progress tickets
@@ -30,6 +32,20 @@ playwright install chromium
 ./scrape-jira.sh --login                  # Force new login (refresh session)
 ./scrape-jira.sh --help                   # Show help with all options
 ```
+
+### Changing Ticket Status
+
+```bash
+./scrape-jira.sh --change-status TICKET-123 --to-status "In Progress"
+./scrape-jira.sh -c TICKET-123 -t "Done"
+```
+
+The script will:
+1. Fetch available transitions for the ticket
+2. Find the transition that leads to the target status
+3. Execute the transition
+
+Note: Available transitions depend on the ticket's current status and your project's workflow.
 
 ### Common Status Values
 
