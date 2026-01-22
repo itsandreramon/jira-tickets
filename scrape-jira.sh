@@ -2,12 +2,17 @@
 #
 # Jira Ticket Scraper
 # Scrapes tickets assigned to you from jira.tools.sap
+# Also supports changing ticket status
 #
 # Usage:
 #   ./scrape-jira.sh                          # Fetch all tickets
 #   ./scrape-jira.sh --status "In Progress"   # Fetch only in-progress tickets
 #   ./scrape-jira.sh --login                  # Force new login
 #   ./scrape-jira.sh --help                   # Show help
+#
+# Change ticket status:
+#   ./scrape-jira.sh --change-status TICKET-123 --to-status "In Progress"
+#   ./scrape-jira.sh -c TICKET-123 -t "Done"
 #
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
