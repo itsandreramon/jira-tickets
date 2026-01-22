@@ -11,7 +11,7 @@ Examples:
     ./scrape-jira.sh                        # Fetch all tickets assigned to you
     ./scrape-jira.sh --status "In Progress" # Fetch only in-progress tickets
     ./scrape-jira.sh --status "Open"        # Fetch only open tickets
-    ./scrape-jira.sh --login                # Force new login
+    ./scrape-jira.sh --login --headed       # Force new login with visible browser
     ./scrape-jira.sh --change-status TICKET-123 --to-status "In Progress"
 """
 import asyncio
@@ -31,6 +31,9 @@ CREDENTIALS_FILE = SCRIPT_DIR / ".jira_credentials.json"
 OUTPUT_DIR = SCRIPT_DIR / "output"
 
 JIRA_BASE_URL = "https://jira.tools.sap"
+
+# Jira Agile board ID for the project (used for sprint operations)
+JIRA_BOARD_ID = 53154  # Timesheet Mobile Android board
 
 # Common Jira status values for reference
 VALID_STATUSES = [
@@ -74,21 +77,42 @@ async def load_credentials():
 # =============================================================================
 
 
-async def login(page):
+async def login(page, headed=False):
     """
     Handle Microsoft SSO login flow.
     
-    SAP Jira uses Microsoft Azure AD for authentication. This function
-    fills in the email and password forms automatically.
-    """
-    credentials = await load_credentials()
-    if not credentials:
-        print("No credentials found. Please create .jira_credentials.json")
-        return False
+    SAP Jira uses Microsoft Azure AD for authentication. In headed mode,
+    waits for manual login. In headless mode, attempts automatic login.
     
+    Args:
+        page: Playwright page object
+        headed: If True, wait for manual login completion
+    """
     print("Logging in to Jira...")
     await page.goto(f"{JIRA_BASE_URL}/login.jsp")
     await page.wait_for_timeout(2000)
+    
+    if headed:
+        # In headed mode, wait for user to complete login manually
+        print("\n" + "=" * 60)
+        print("Please complete the login in the browser window.")
+        print("Waiting for redirect back to Jira...")
+        print("=" * 60 + "\n")
+        
+        # Wait until we're back on jira.tools.sap (not login or microsoftonline)
+        while "login" in page.url.lower() or "microsoftonline" in page.url:
+            await page.wait_for_timeout(1000)
+        
+        print("Login successful!")
+        await page.wait_for_timeout(2000)
+        return True
+    
+    # Headless mode: attempt automatic login
+    credentials = await load_credentials()
+    if not credentials:
+        print("No credentials found. Please create .jira_credentials.json")
+        print("Or use --headed flag for interactive login.")
+        return False
     
     # Check if redirected to Microsoft login
     if "login.microsoftonline.com" in page.url:
@@ -201,6 +225,10 @@ async def execute_transition(page, issue_key, transition_id):
     
     print(f"Executing transition {transition_id} on {issue_key}...")
     
+    # Navigate to the issue page first so fetch() runs from correct origin
+    await page.goto(f"{JIRA_BASE_URL}/browse/{issue_key}")
+    await page.wait_for_timeout(1000)
+    
     # Use page.evaluate to make POST request with browser cookies
     result = await page.evaluate("""
         async (args) => {
@@ -232,6 +260,115 @@ async def execute_transition(page, issue_key, transition_id):
     else:
         error_msg = result.get("error") or f"HTTP {result.get('status')} {result.get('statusText')}"
         print(f"Failed to execute transition: {error_msg}")
+        return False
+
+
+async def get_active_sprint(page):
+    """
+    Get the active sprint for the project board.
+    
+    Uses the Jira Agile REST API to fetch sprints and find the active one.
+    
+    Args:
+        page: Playwright page object with active session
+    
+    Returns:
+        Sprint object with id and name, or None if no active sprint found
+    """
+    api_url = f"{JIRA_BASE_URL}/rest/agile/1.0/board/{JIRA_BOARD_ID}/sprint?state=active"
+    
+    print("Fetching active sprint...")
+    response = await page.goto(api_url)
+    
+    if response.status != 200:
+        print(f"Failed to fetch sprints: HTTP {response.status}")
+        return None
+    
+    content = await page.content()
+    
+    # Extract JSON from page content
+    json_match = re.search(r'<pre[^>]*>(.*?)</pre>', content, re.DOTALL)
+    if json_match:
+        json_text = json_match.group(1)
+        json_text = json_text.replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&').replace('&quot;', '"')
+    else:
+        body_match = re.search(r'<body[^>]*>(.*?)</body>', content, re.DOTALL)
+        if body_match:
+            json_text = body_match.group(1).strip()
+            json_text = re.sub(r'<[^>]+>', '', json_text)
+            json_text = json_text.replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&').replace('&quot;', '"')
+        else:
+            json_text = content
+    
+    try:
+        data = json.loads(json_text)
+        sprints = data.get("values", [])
+        if sprints:
+            active_sprint = sprints[0]
+            print(f"Found active sprint: {active_sprint.get('name')} (ID: {active_sprint.get('id')})")
+            return active_sprint
+        else:
+            print("No active sprint found")
+            return None
+    except json.JSONDecodeError as e:
+        print(f"Failed to parse sprint JSON: {e}")
+        return None
+
+
+async def move_to_sprint(page, issue_key, sprint_id):
+    """
+    Move a ticket to a specific sprint.
+    
+    Uses the Jira Agile REST API to add the issue to the sprint.
+    
+    Args:
+        page: Playwright page object with active session
+        issue_key: Jira issue key (e.g., "PROJECT-123")
+        sprint_id: ID of the sprint to move the issue to
+    
+    Returns:
+        True on success, False on failure
+    """
+    api_url = f"{JIRA_BASE_URL}/rest/agile/1.0/sprint/{sprint_id}/issue"
+    
+    print(f"Moving {issue_key} to sprint {sprint_id}...")
+    
+    # Navigate to Jira page first so fetch() runs from correct origin
+    await page.goto(f"{JIRA_BASE_URL}/browse/{issue_key}")
+    await page.wait_for_timeout(1000)
+    
+    # Use page.evaluate to make POST request with browser cookies
+    result = await page.evaluate("""
+        async (args) => {
+            const [url, issueKey] = args;
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        issues: [issueKey]
+                    }),
+                    credentials: 'include'
+                });
+                return {
+                    ok: response.ok,
+                    status: response.status,
+                    statusText: response.statusText
+                };
+            } catch (error) {
+                return { ok: false, error: error.message };
+            }
+        }
+    """, [api_url, issue_key])
+    
+    if result.get("ok"):
+        print(f"Successfully moved {issue_key} to sprint")
+        return True
+    else:
+        error_msg = result.get("error") or f"HTTP {result.get('status')} {result.get('statusText')}"
+        print(f"Failed to move to sprint: {error_msg}")
         return False
 
 
@@ -283,6 +420,12 @@ async def change_ticket_status(page, issue_key, target_status):
     
     if success:
         print(f"Successfully changed {issue_key} status to '{target_status}'")
+        
+        # If transitioning to "In Progress", also move to active sprint
+        if target_status.lower() == "in progress":
+            active_sprint = await get_active_sprint(page)
+            if active_sprint:
+                await move_to_sprint(page, issue_key, active_sprint.get("id"))
     
     return success
 
@@ -449,7 +592,7 @@ Examples:
   %(prog)s                        Fetch all tickets assigned to you
   %(prog)s --status "In Progress" Fetch only in-progress tickets
   %(prog)s --status "Open"        Fetch only open tickets
-  %(prog)s --login                Force new login (refresh session)
+  %(prog)s --login --headed       Force new login with visible browser
   
   %(prog)s --change-status TICKET-123 --to-status "In Progress"
                                   Change ticket status
@@ -471,6 +614,11 @@ Note: Status values are case-sensitive and may vary by project.
         "--login", "-l",
         action="store_true",
         help="Force new login (ignore saved session)"
+    )
+    parser.add_argument(
+        "--headed",
+        action="store_true",
+        help="Run browser in headed mode (visible window for interactive login)"
     )
     parser.add_argument(
         "--change-status", "-c",
@@ -498,8 +646,8 @@ Note: Status values are case-sensitive and may vary by project.
     jql_query = build_jql_query(status=args.status)
     
     async with async_playwright() as p:
-        # Launch headless browser
-        browser = await p.chromium.launch(headless=True)
+        # Launch browser (headed mode if --headed flag is set)
+        browser = await p.chromium.launch(headless=not args.headed)
         context = await browser.new_context()
         
         # Restore session cookies if available (skip if --login flag)
@@ -515,7 +663,7 @@ Note: Status values are case-sensitive and may vary by project.
         # Check if we need to login (redirected to login page)
         if "login" in page.url.lower() or "microsoftonline" in page.url:
             print("Session expired or no session found. Logging in...")
-            await login(page)
+            await login(page, headed=args.headed)
             await page.wait_for_timeout(3000)
         
         # Handle status change mode
