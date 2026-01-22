@@ -1,6 +1,6 @@
 # Jira Ticket Scraper
 
-Scrapes Jira tickets assigned to you from jira.tools.sap and saves each ticket description to a separate text file.
+Scrapes Jira tickets assigned to you and saves each ticket description to a separate text file.
 
 Also supports **changing ticket status** via the Jira transitions API.
 
@@ -15,10 +15,17 @@ pip install playwright
 playwright install chromium
 ```
 
-2. Create a `.jira_credentials.json` file with your SAP credentials:
+2. Create a `.env` file with your Jira configuration:
+
+```bash
+JIRA_BASE_URL=https://jira.example.com
+JIRA_BOARD_ID=12345  # Optional: Agile board ID for sprint operations
+```
+
+3. Create a `.jira_credentials.json` file with your credentials:
 
 ```json
-{"username": "your.email@sap.com", "password": "your-password"}
+{"username": "your.email@example.com", "password": "your-password"}
 ```
 
 ## Usage
@@ -78,6 +85,14 @@ Each ticket is saved as a `.txt` file in its corresponding status folder.
 
 - `jira_scraper.py` - Main Python scraper using Playwright
 - `scrape-jira.sh` - Shell wrapper script
-- `.jira_credentials.json` - Your SAP credentials (not tracked in git)
+- `.env` - Environment configuration (not tracked in git)
+- `.jira_credentials.json` - Your credentials (not tracked in git)
 - `.jira_cookies.json` - Saved session cookies (not tracked in git)
 - `output/` - Ticket description files (not tracked in git)
+
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `JIRA_BASE_URL` | Yes | Base URL of your Jira instance |
+| `JIRA_BOARD_ID` | No | Agile board ID for sprint operations |

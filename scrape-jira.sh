@@ -1,8 +1,12 @@
 #!/bin/bash
 #
 # Jira Ticket Scraper
-# Scrapes tickets assigned to you from jira.tools.sap
+# Scrapes tickets assigned to you from your Jira instance
 # Also supports changing ticket status
+#
+# Environment Variables (required):
+#   JIRA_BASE_URL   - Base URL of your Jira instance (e.g., https://jira.example.com)
+#   JIRA_BOARD_ID   - Agile board ID for sprint operations (optional)
 #
 # Usage:
 #   ./scrape-jira.sh                          # Fetch all tickets
@@ -18,6 +22,23 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="$SCRIPT_DIR/.venv"
 PYTHON_SCRIPT="$SCRIPT_DIR/jira_scraper.py"
+ENV_FILE="$SCRIPT_DIR/.env"
+
+# Load environment variables from .env file if it exists
+if [ -f "$ENV_FILE" ]; then
+    set -a
+    source "$ENV_FILE"
+    set +a
+fi
+
+# Check required environment variables
+if [ -z "$JIRA_BASE_URL" ]; then
+    echo "Error: JIRA_BASE_URL environment variable is not set"
+    echo ""
+    echo "Please set it in your environment or create a .env file:"
+    echo "  echo 'JIRA_BASE_URL=https://jira.example.com' > $ENV_FILE"
+    exit 1
+fi
 
 # Check if venv exists
 if [ ! -d "$VENV_DIR" ]; then

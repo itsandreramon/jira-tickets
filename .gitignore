@@ -1,7 +1,8 @@
 # Output files
 output/
 
-# Credentials and cookies
+# Credentials, cookies, and environment config
+.env
 .jira_credentials.json
 .jira_cookies.json
 
