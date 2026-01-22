@@ -2,10 +2,14 @@
 """
 Jira Ticket Scraper
 
-Fetches tickets from jira.tools.sap using Playwright and the Jira REST API.
+Fetches tickets from Jira using Playwright and the Jira REST API.
 Saves each ticket description to a separate text file in the output directory.
 
 Also supports changing ticket status via the Jira transitions API.
+
+Environment Variables:
+    JIRA_BASE_URL   - Base URL of your Jira instance (required)
+    JIRA_BOARD_ID   - Agile board ID for sprint operations (optional)
 
 Examples:
     ./scrape-jira.sh                        # Fetch all tickets assigned to you
@@ -17,6 +21,7 @@ Examples:
 import asyncio
 import argparse
 import json
+import os
 import re
 from pathlib import Path
 from playwright.async_api import async_playwright
@@ -30,10 +35,9 @@ COOKIES_FILE = SCRIPT_DIR / ".jira_cookies.json"
 CREDENTIALS_FILE = SCRIPT_DIR / ".jira_credentials.json"
 OUTPUT_DIR = SCRIPT_DIR / "output"
 
-JIRA_BASE_URL = "https://jira.tools.sap"
-
-# Jira Agile board ID for the project (used for sprint operations)
-JIRA_BOARD_ID = 53154  # Timesheet Mobile Android board
+# Jira configuration - can be overridden via environment variables
+JIRA_BASE_URL = os.environ.get("JIRA_BASE_URL", "https://jira.example.com")
+JIRA_BOARD_ID = int(os.environ.get("JIRA_BOARD_ID", "0"))  # Agile board ID for sprint operations
 
 # Common Jira status values for reference
 VALID_STATUSES = [
@@ -99,7 +103,7 @@ async def login(page, headed=False):
         print("Waiting for redirect back to Jira...")
         print("=" * 60 + "\n")
         
-        # Wait until we're back on jira.tools.sap (not login or microsoftonline)
+        # Wait until we're back on Jira (not login or microsoftonline)
         while "login" in page.url.lower() or "microsoftonline" in page.url:
             await page.wait_for_timeout(1000)
         
